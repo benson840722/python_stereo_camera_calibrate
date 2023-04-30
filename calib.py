@@ -7,8 +7,46 @@ import yaml
 import os
 
 #This will contain the calibration settings from the calibration_settings.yaml file
-calibration_settings = {}
-
+#calibration_settings = {}
+'''
+mono_calibration_frames: 10
+stereo_calibration_frames: 10
+view_resize: 1
+checkerboard_box_size_scale : 2.9
+checkerboard_rows: 6
+checkerboard_columns: 8
+cooldown: 100
+'''
+def gstreamer_pipeline(
+        sensor_id,
+        sensor_mode=3,
+        capture_width=1280,
+        capture_height=720,
+        display_width=1280,
+        display_height=720,
+        framerate=30,
+        flip_method=0,
+):
+    return (
+            "nvarguscamerasrc sensor-id=%d sensor-mode=%d ! "
+            "video/x-raw(memory:NVMM), "
+            "width=(int)%d, height=(int)%d, "
+            "format=(string)NV12, framerate=(fraction)%d/1 ! "
+            "nvvidconv flip-method=%d ! "
+            "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
+            "videoconvert ! "
+            "video/x-raw, format=(string)BGR ! appsink"
+            % (
+                sensor_id,
+                sensor_mode,
+                capture_width,
+                capture_height,
+                framerate,
+                flip_method,
+                display_width,
+                display_height,
+            )
+     )
 #Given Projection matrices P1 and P2, and pixel coordinates point1 and point2, return triangulated 3D point.
 def DLT(P1, P2, point1, point2):
 
@@ -26,7 +64,7 @@ def DLT(P1, P2, point1, point2):
     #print(Vh[3,0:3]/Vh[3,3])
     return Vh[3,0:3]/Vh[3,3]
 
-
+'''
 #Open and load the calibration_settings.yaml file
 def parse_calibration_settings_file(filename):
     
@@ -45,36 +83,37 @@ def parse_calibration_settings_file(filename):
     if 'camera0' not in calibration_settings.keys():
         print('camera0 key was not found in the settings file. Check if correct calibration_settings.yaml file was passed')
         quit()
-
+'''
 
 #Open camera stream and save frames
-def save_frames_single_camera(camera_name):
+def save_frames_camera(cam_id):
 
     #create frames directory
     if not os.path.exists('frames'):
         os.mkdir('frames')
 
     #get settings
-    camera_device_id = calibration_settings[camera_name]
-    width = calibration_settings['frame_width']
-    height = calibration_settings['frame_height']
-    number_to_save = calibration_settings['mono_calibration_frames']
-    view_resize = calibration_settings['view_resize']
-    cooldown_time = calibration_settings['cooldown']
+    
+    #camera_device_id = gstreamer_pipeline(sensor_id)
+    
+    number_to_save = 10
+    view_resize = 1
 
     #open video stream and change resolution.
     #Note: if unsupported resolution is used, this does NOT raise an error.
-    cap = cv.VideoCapture(camera_device_id)
-    cap.set(3, width)
-    cap.set(4, height)
-    
+ 
+    cam0 = cv.VideoCapture(gstreamer_pipeline(sensor_id=cam_id),cv.CAP_GSTREAMER)
+    #cam0 = cv.flip(cam0,0)
+    cam0.set(3, width)
+    cam0.set(4, height)
     cooldown = cooldown_time
     start = False
     saved_count = 0
-
+    
     while True:
     
-        ret, frame = cap.read()
+        ret, frame = cam0.read()
+        frame = cv.flip(frame,0)
         if ret == False:
             #if no video data is received, can't calibrate the camera, so exit.
             print("No video data received from camera. Exiting...")
@@ -92,7 +131,7 @@ def save_frames_single_camera(camera_name):
             
             #save the frame when cooldown reaches 0.
             if cooldown <= 0:
-                savename = os.path.join('frames', camera_name + '_' + str(saved_count) + '.png')
+                savename = os.path.join('frames', 'camera' + str(cam_id) + '_' + str(saved_count) + '.png')
                 cv.imwrite(savename, frame)
                 saved_count += 1
                 cooldown = cooldown_time
@@ -112,7 +151,76 @@ def save_frames_single_camera(camera_name):
         if saved_count == number_to_save: break
 
     cv.destroyAllWindows()
+'''
+def save_frames_right_camera(sensor_id):
 
+    #create frames directory
+    if not os.path.exists('frames'):
+        os.mkdir('frames')
+
+    #get settings
+    
+    #camera_device_id = gstreamer_pipeline(sensor_id)
+    #width = 1280
+    #height = 720
+    number_to_save = 10
+    view_resize = 1
+
+    #open video stream and change resolution.
+    #Note: if unsupported resolution is used, this does NOT raise an error.
+ 
+    cam1 = cv.VideoCapture(gstreamer_pipeline(sensor_id=1),cv.CAP_GSTREAMER)
+    #cam1 = cv.flip(cam1,0)
+    cam1.set(3, width)
+    cam1.set(4, height)
+    #cooldown = 100
+    cooldown = cooldown_time
+    start = False
+    saved_count = 0
+    
+    while True:
+    
+        ret, frame = cam1.read()
+        frame = cv.flip(frame,0)
+        
+        if ret == False:
+            #if no video data is received, can't calibrate the camera, so exit.
+            print("No video data received from camera. Exiting...")
+            quit()
+
+        frame_small = cv.resize(frame, None, fx = 1/view_resize, fy=1/view_resize)
+
+        if not start:
+            cv.putText(frame_small, "Press SPACEBAR to start collection frames", (50,50), cv.FONT_HERSHEY_COMPLEX, 1, (0,0,255), 1)
+        
+        if start:
+            cooldown -= 1
+            cv.putText(frame_small, "Cooldown: " + str(cooldown), (50,50), cv.FONT_HERSHEY_COMPLEX, 1, (0,255,0), 1)
+            cv.putText(frame_small, "Num frames: " + str(saved_count), (50,100), cv.FONT_HERSHEY_COMPLEX, 1, (0,255,0), 1)
+            
+            #save the frame when cooldown reaches 0.
+            if cooldown <= 0:
+                savename = os.path.join('frames', str(sensor_id) + '_' + str(saved_count) + '.png')
+                cv.imwrite(savename, frame)
+                saved_count += 1
+                cooldown = cooldown_time
+
+        cv.imshow('frame_small', frame_small)
+        k = cv.waitKey(1)
+        
+        if k == 27:
+            #if ESC is pressed at any time, the program will exit.
+            quit()
+
+        if k == 32:
+            #Press spacebar to start data collection
+            start = True
+
+        #break out of the loop when enough number of frames have been saved
+        if saved_count == number_to_save: break
+
+    cv.destroyAllWindows()
+'''
 
 #Calibrate single camera to obtain camera intrinsic parameters from saved frames.
 def calibrate_camera_for_intrinsic_parameters(images_prefix):
@@ -127,9 +235,9 @@ def calibrate_camera_for_intrinsic_parameters(images_prefix):
     #Change this if the code can't find the checkerboard. 
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 0.001)
 
-    rows = calibration_settings['checkerboard_rows']
-    columns = calibration_settings['checkerboard_columns']
-    world_scaling = calibration_settings['checkerboard_box_size_scale'] #this will change to user defined length scale
+    rows = 6
+    columns = 8
+    world_scaling = 2.9 #this will change to user defined length scale
 
     #coordinates of squares in the checkerboard world space
     objp = np.zeros((rows*columns,3), np.float32)
@@ -137,8 +245,8 @@ def calibrate_camera_for_intrinsic_parameters(images_prefix):
     objp = world_scaling* objp
 
     #frame dimensions. Frames should be the same size.
-    width = images[0].shape[1]
-    height = images[0].shape[0]
+    #width = images[0].shape[1]
+    #height = images[0].shape[0]
 
     #Pixel coordinates of checkerboards
     imgpoints = [] # 2d points in image plane.
@@ -183,13 +291,13 @@ def calibrate_camera_for_intrinsic_parameters(images_prefix):
     return cmtx, dist
 
 #save camera intrinsic parameters to file
-def save_camera_intrinsics(camera_matrix, distortion_coefs, camera_name):
+def save_camera_intrinsics(camera_matrix, distortion_coefs, sensor_id):
 
     #create folder if it does not exist
     if not os.path.exists('camera_parameters'):
         os.mkdir('camera_parameters')
 
-    out_filename = os.path.join('camera_parameters', camera_name + '_intrinsics.dat')
+    out_filename = os.path.join('camera_parameters', sensor_id + '_intrinsics.dat')
     outf = open(out_filename, 'w')
 
     outf.write('intrinsic:\n')
@@ -212,30 +320,30 @@ def save_frames_two_cams(camera0_name, camera1_name):
         os.mkdir('frames_pair')
 
     #settings for taking data
-    view_resize = calibration_settings['view_resize']
-    cooldown_time = calibration_settings['cooldown']    
-    number_to_save = calibration_settings['stereo_calibration_frames']
-
+    view_resize = 1
+    #cooldown_time = 100   
+    number_to_save = 10
     #open the video streams
-    cap0 = cv.VideoCapture(calibration_settings[camera0_name])
-    cap1 = cv.VideoCapture(calibration_settings[camera1_name])
-
+    cam0 = cv.VideoCapture( gstreamer_pipeline(sensor_id=0), cv.CAP_GSTREAMER)
+    
+    cam1 = cv.VideoCapture( gstreamer_pipeline(sensor_id=1), cv.CAP_GSTREAMER)
+    
     #set camera resolutions
-    width = calibration_settings['frame_width']
-    height = calibration_settings['frame_height']
-    cap0.set(3, width)
-    cap0.set(4, height)
-    cap1.set(3, width)
-    cap1.set(4, height)
-
+    #width = 640
+    #height = 480
+    cam0.set(3, width)
+    cam0.set(4, height)
+    cam1.set(3, width)
+    cam1.set(4, height)
     cooldown = cooldown_time
     start = False
     saved_count = 0
     while True:
 
-        ret0, frame0 = cap0.read()
-        ret1, frame1 = cap1.read()
-
+        ret0, frame0 = cam0.read()
+        frame0 = cv.flip(frame0,0)
+        ret1, frame1 = cam1.read()
+        frame1 = cv.flip(frame1,0)
         if not ret0 or not ret1:
             print('Cameras not returning video data. Exiting...')
             quit()
@@ -298,9 +406,9 @@ def stereo_calibrate(mtx0, dist0, mtx1, dist1, frames_prefix_c0, frames_prefix_c
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 0.001)
 
     #calibration pattern settings
-    rows = calibration_settings['checkerboard_rows']
-    columns = calibration_settings['checkerboard_columns']
-    world_scaling = calibration_settings['checkerboard_box_size_scale']
+    rows = 6
+    columns = 8
+    world_scaling = 2.9
 
     #coordinates of squares in the checkerboard world space
     objp = np.zeros((rows*columns,3), np.float32)
@@ -308,8 +416,8 @@ def stereo_calibrate(mtx0, dist0, mtx1, dist1, frames_prefix_c0, frames_prefix_c
     objp = world_scaling* objp
 
     #frame dimensions. Frames should be the same size.
-    width = c0_images[0].shape[1]
-    height = c0_images[0].shape[0]
+    #width = c0_images[0].shape[1]
+    #height = c0_images[0].shape[0]
 
     #Pixel coordinates of checkerboards
     imgpoints_left = [] # 2d points in image plane.
@@ -371,7 +479,7 @@ def get_projection_matrix(cmtx, R, T):
     return P
 
 # After calibrating, we can see shifted coordinate axes in the video feeds directly
-def check_calibration(camera0_name, camera0_data, camera1_name, camera1_data, _zshift = 50.):
+def check_calibration(camera0_name, camera0_data, camera1_name, camera1_data, _zshift = 30.):
     
     cmtx0 = np.array(camera0_data[0])
     dist0 = np.array(camera0_data[1])
@@ -416,21 +524,21 @@ def check_calibration(camera0_name, camera0_data, camera1_name, camera1_data, _z
     pixel_points_camera1 = np.array(pixel_points_camera1)
 
     #open the video streams
-    cap0 = cv.VideoCapture(calibration_settings[camera0_name])
-    cap1 = cv.VideoCapture(calibration_settings[camera1_name])
+    cam0 = cv.VideoCapture(gstreamer_pipeline(sensor_id=0),cv.CAP_GSTREAMER)
+    cam1 = cv.VideoCapture(gstreamer_pipeline(sensor_id=1),cv.CAP_GSTREAMER)
 
     #set camera resolutions
-    width = calibration_settings['frame_width']
-    height = calibration_settings['frame_height']
-    cap0.set(3, width)
-    cap0.set(4, height)
-    cap1.set(3, width)
-    cap1.set(4, height)
+    #width = 640
+    #height = 480
+    cam0.set(3, width)
+    cam0.set(4, height)
+    cam1.set(3, width)
+    cam1.set(4, height)
 
     while True:
 
-        ret0, frame0 = cap0.read()
-        ret1, frame1 = cap1.read()
+        ret0, frame0 = cam0.read()
+        ret1, frame1 = cam1.read()
 
         if not ret0 or not ret1:
             print('Video stream not returning frame data')
@@ -449,7 +557,8 @@ def check_calibration(camera0_name, camera0_data, camera1_name, camera1_data, _z
         for col, _p in zip(colors, pixel_points_camera1[1:]):
             _p = tuple(_p.astype(np.int32))
             cv.line(frame1, origin, _p, col, 2)
-
+        frame0 = cv.flip(frame0,0)
+        frame1 = cv.flip(frame1,0)
         cv.imshow('frame0', frame0)
         cv.imshow('frame1', frame1)
 
@@ -463,9 +572,9 @@ def get_world_space_origin(cmtx, dist, img_path):
     frame = cv.imread(img_path, 1)
 
     #calibration pattern settings
-    rows = calibration_settings['checkerboard_rows']
-    columns = calibration_settings['checkerboard_columns']
-    world_scaling = calibration_settings['checkerboard_box_size_scale']
+    rows = 6
+    columns = 8
+    world_scaling = 2.9
 
     #coordinates of squares in the checkerboard world space
     objp = np.zeros((rows*columns,3), np.float32)
@@ -565,18 +674,21 @@ def save_extrinsic_calibration_parameters(R0, T0, R1, T1, prefix = ''):
 
 if __name__ == '__main__':
 
-    if len(sys.argv) != 2:
-        print('Call with settings filename: "python3 calibrate.py calibration_settings.yaml"')
-        quit()
+    #if len(sys.argv) != 2:
+        #print('Call with settings filename: "python3 calibrate.py calibration_settings.yaml"')
+        #quit()
     
     #Open and parse the settings file
-    parse_calibration_settings_file(sys.argv[1])
-
-
+    #parse_calibration_settings_file(sys.argv[1])
+    global cooldown_time,width,height
+    cooldown_time = 50
+    width = 1280
+    height = 720
+     
     """Step1. Save calibration frames for single cameras"""
-    save_frames_single_camera('camera0') #save frames for camera0
-    save_frames_single_camera('camera1') #save frames for camera1
-
+    save_frames_camera(0) #save frames for camera0
+    save_frames_camera(1) #save frames for camera1
+    
 
     """Step2. Obtain camera intrinsic matrices and save them"""
     #camera0 intrinsics
@@ -587,11 +699,10 @@ if __name__ == '__main__':
     images_prefix = os.path.join('frames', 'camera1*')
     cmtx1, dist1 = calibrate_camera_for_intrinsic_parameters(images_prefix)
     save_camera_intrinsics(cmtx1, dist1, 'camera1') #this will write cmtx and dist to disk
-
-
+    
     """Step3. Save calibration frames for both cameras simultaneously"""
     save_frames_two_cams('camera0', 'camera1') #save simultaneous frames
-
+    
 
     """Step4. Use paired calibration pattern frames to obtain camera0 to camera1 rotation and translation"""
     frames_prefix_c0 = os.path.join('frames_pair', 'camera0*')
@@ -609,7 +720,7 @@ if __name__ == '__main__':
     #check your calibration makes sense
     camera0_data = [cmtx0, dist0, R0, T0]
     camera1_data = [cmtx1, dist1, R1, T1]
-    check_calibration('camera0', camera0_data, 'camera1', camera1_data, _zshift = 60.)
+    check_calibration('camera0', camera0_data, 'camera1', camera1_data, _zshift = 30.)
 
 
     """Optional. Define a different origin point and save the calibration data"""
